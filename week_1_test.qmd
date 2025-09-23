@@ -1,0 +1,50 @@
+---
+title: "Buddy System Testing"
+format: html
+editor: visual
+---
+
+## Idea
+
+What principle are you using to measure a "good" cluster?\
+Why does this make sense? How would this be tuned - that is, what resampling does it need? Does this apply in general, or only for a particular type of clustering algorithm? Link any references that might help support this.
+
+## Metric Calculation
+
+Write a function here that calculates your "tuning metric" for a particular value of k.
+
+```{r}
+# Closely follows the algorithm set in Ben-Hur and Elisseeff paper: A stability based method for discovering structure in clustered data (2002)
+library(tidyclust)
+library(tidyverse)
+library(tidymodels)
+# For a given k, we want to resample j times. 
+# We need an index of every single observation in order to be able to compare consistently
+# across all resamples.
+
+k <- 3
+# set up k = 3 for initial testing
+data(penguins)
+
+# For a given k:
+  # Add an index column to keep track of observations even after shuffling
+  # Iterate over the resample amounts (from 1:j)
+    # first_data <- Randomly select 80% of the data
+    # clust_assignment <- clust(first_data)
+    
+    # Convert clust_assignment to matrix form (this is the difficult part)
+      # The matrix is NA if the observation is being compared with itself (i = j)
+      # The matrix is symmetrical
+      # The value is equal to 1 if the observation is within the same cluster
+      # The value is equal to -1 if the observation is not in the same cluster
+      # The value is equal to 0 if either observation does not exist in that resample.
+    
+```
+
+## Experiments
+
+On either simluated data or real data with known structure, run several replications of your experiment for each of various k's. Make sure to set a seed.
+
+## Results
+
+What did your experiments show? Why do you think this happened? Is there anything promising here?
