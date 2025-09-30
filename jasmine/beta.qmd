@@ -1,0 +1,151 @@
+---
+title: "Buddy System Testing"
+format: html
+editor: visual
+---
+
+## Idea
+
+What principle are you using to measure a "good" cluster?\
+Why does this make sense? How would this be tuned - that is, what resampling does it need? Does this apply in general, or only for a particular type of clustering algorithm? Link any references that might help support this.
+
+## Metric Calculation
+
+Write a function here that calculates your "tuning metric" for a particular value of k.
+
+```{r}
+# libraries
+library(tidyclust)
+library(tidyverse)
+library(tidymodels)
+```
+
+80%
+
+1.  n_obs
+2.  make index col
+3.  make nxn matrix with 0
+4.  resample from data
+5.  run k-means cluster on data
+    1.  extract cluster assigments
+6.  two for loops
+    1.  for i in 1:size(resample)
+    2.  for j in 1:size(resample)
+
+```{r}
+# EXECUTION TIME START
+start <- Sys.time()
+
+# data
+data(penguins)
+data <- penguins
+
+# create index column
+data$index <- 1:nrow(data)
+
+# remove NA values before passing in since we can't handle NA values rn lmao
+data <- data |> 
+  drop_na()
+
+# initialize variables
+min_k <- 3
+max_k <- 5
+number_of_resamples <- 3
+proportion_resample <- 0.8
+
+# initialize results list
+results <- list()
+```
+
+For a given k, we want to resample j times.
+
+We need an index of every single observation in order to be able to compare consistently across all resamples.
+
+For a given k:
+
+\# Add an index column to keep track of observations even after shuffling \# Iterate over the resample amounts (from 1:j) \# first_data \<- Randomly select 80% of the data \# clust_assignment \<- clust(first_data)
+
+Convert clust_assignment to matrix form (this is the difficult part) The matrix is NA if the observation is being compared with itself (i = j) The matrix is symmetrical The value is equal to 1 if the observation is within the same cluster The value is equal to -1 if the observation is not in the same cluster The value is equal to 0 if either observation does not exist in that resample.
+
+```{r}
+# loop through k
+for (k in min_k:max_k){
+  # reinitialize result matrix each k
+  result_matrix <- matrix(0, nrow = nrow(data), ncol = nrow(data))
+  
+  # create list for key
+  key = as.character(k)
+  if (is.null(results[[key]])) {
+    results[[key]] <- list()}
+  
+  # loop through resamples
+  for (i in 1:number_of_resamples) {
+    
+    # 80% resample
+    random_sample <- data |> 
+      filter(index %in% sample(index, proportion_resample * nrow(data)))
+    
+    # run k-means on resample
+    kmeans <- k_means(num_clusters = k) |> 
+      fit(~ bill_length_mm + flipper_length_mm,
+          data = random_sample)
+    
+    # assign points to cluster
+    intermediate <- data.frame(random_sample$index,
+                               extract_cluster_assignment(kmeans) |> 
+                               mutate(.cluster = as.character(.cluster)),
+                               stringsAsFactors = FALSE)
+    
+    # index cluster dataframe
+    colnames(intermediate) <- c("index", "cluster")
+    
+    # assign results matrix (-1, 1, 0)
+    for (n in 1:(nrow(intermediate)-1)) {
+      for (m in (n+1):nrow(intermediate)) {
+        
+        # get first point cluster
+        first <- intermediate[n, ]$cluster
+        
+        # get second point cluster
+        second <- intermediate[m, ]$cluster
+        
+        # if clusters are the same, 1
+        if (first == second) {
+          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- 1}
+        
+        # if clusters are different, 0
+        else {
+          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- -1}}}
+  
+    # if point i == j (on diagonal) then set to NA
+    result_matrix[row(result_matrix) == col(result_matrix)] <- NA
+    
+    # set lower triangle to NA
+    result_matrix[lower.tri(result_matrix)] <- NA
+    final_matrix <- result_matrix
+    
+    # append matrix to key
+    results[[key]][[length(results[[key]]) + 1]] <- final_matrix
+    }}
+
+  
+# EXECUTION TIME START
+end <- Sys.time()
+end - start
+
+```
+
+```{r}
+# checking matrices for funsies
+length(results)
+results[["3"]][[1]]
+results[["4"]][[2]]
+```
+
+## Experiments
+
+On either simulated data or real data with known structure, run several replications of your experiment for each of various k's. Make sure to set a seed.
+
+## Results
+
+What did your experiments show? Why do you think this happened? Is there anything promising here?
