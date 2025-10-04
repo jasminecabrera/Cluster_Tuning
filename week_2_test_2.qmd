@@ -12,6 +12,7 @@ Why does this make sense? How would this be tuned - that is, what resampling doe
 Write a function here that calculates your "tuning metric" for a particular value of k.
 
 ```{r}
+set.seed(599)
 # Closely follows the algorithm set in Ben-Hur and Elisseeff paper: A stability based method for discovering structure in clustered data (2002)
 library(tidyclust)
 library(tidyverse)
@@ -22,14 +23,13 @@ library(tidymodels)
 
 k <- 3
 # set up k = 3 for initial testing
-data <- iris
+data <- penguins
 
 # Remove NA values before passing in since we can't handle NA values rn lmao
 data <- data |> 
   drop_na() |> 
-  mutate(Petal.Width = scale(Petal.Width),
-         Petal.Length = scale(Petal.Length),
-         Sepal.Length = scale(Sepal.Length))
+  mutate(bill_length_mm = scale(bill_length_mm),
+         flipper_length_mm = scale(flipper_length_mm))
 
 
 # For a given k:
@@ -51,6 +51,7 @@ number_of_resamples <- 10
 proportion_resample <- 0.8
 data$index <- 1:nrow(data)
 results <- list()
+statistic <- data.frame()
 
 # For loop
 # for (num_resample in 1:number_of_resamples) {
@@ -121,7 +122,7 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
     
     # Run k-means on resample
     kmeans <- k_means(num_clusters = k) |> 
-      fit(~ Petal.Length + Petal.Width + Sepal.Length,
+      fit(~ bill_length_mm + flipper_length_mm,
           data = random_sample)
     
     intermediate <- data.frame(random_sample$index,
@@ -152,8 +153,8 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
             result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- -1
           }
         }
-  
-  
+
+
       }
     }
     for (i in 1:nrow(result_matrix)) {
@@ -167,58 +168,44 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
 ```
 
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 10, k = 2)
-```
-
-```{r}
 final_sum_matrix <- data.frame()
 ```
 
 
 # k = 2
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 20, k = 2)
+res <- resample_function(data = data, number_of_resamples = 10, k = 2)
 final <- res |> 
-  reduce(`+`)
+  reduce(`+`) |> 
+  abs()
 
 final <- as.vector(final)
 
-data.frame(final) |> 
-  ggplot(aes(x = final)) +
-  geom_histogram()
-
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 2))
-
-sd(final, na.rm = TRUE)
-mean(final, na.rm = TRUE)
 ```
 
 # k = 3
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 20, k = 3)
+res <- resample_function(data = data, number_of_resamples = 10, k = 3)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector() 
-
-data.frame(final) |> 
-  ggplot(aes(x = final)) +
-  geom_histogram()
+  as.vector() |> 
+  abs()
 
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 3))
 
-sd(final, na.rm = TRUE)
-mean(final, na.rm = TRUE)
 
 ```
 
 # k = 4
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 20, k = 4)
+res <- resample_function(data = data, number_of_resamples = 10, k = 4)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector()
+  as.vector() |> 
+  abs()
 
 # omg, flashback to zero-inflated poisson?????
 
@@ -226,50 +213,44 @@ final <- res |>
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 4))
 
-sd(final, na.rm = TRUE)
-mean(final, na.rm = TRUE)
-
-
-res <- resample_function(data = data, number_of_resamples = 20, k = 5)
+res <- resample_function(data = data, number_of_resamples = 10, k = 5)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector()
+  as.vector() |> 
+  abs()
 # omg, flashback to zero-inflated poisson?????
 
 
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 5))
 
-
-sd(final, na.rm = TRUE)
-mean(final, na.rm = TRUE)
 ```
 
 
 ```{r}
-new_d <- iris
-new_d$index <- 1:nrow(new_d)
-
-random_sample <- new_d |> 
-    filter(index %in% sample(index, proportion_resample * nrow(new_d)))
-  
-
-random_sample <- random_sample |> 
-  drop_na() |> 
-  mutate(Petal.Length = scale(Petal.Length),
-         Sepal.Length = scale(Sepal.Length),
-         Petal.Width = scale(Petal.Width))
-kmeans <- k_means(num_clusters = 3) |> 
-    fit(~ Petal.Length + Petal.Width + Sepal.Length,
-          data = random_sample)
-
-random_sample |> 
-  ggplot(aes(x = Petal.Length, y = Sepal.Length, color = as.factor(kmeans$fit$cluster))) +
-  geom_point()
-
-random_sample |> 
-  ggplot(aes(x = Petal.Length, y = Sepal.Length, color = Species)) +
-  geom_point()
+# new_d <- iris
+# new_d$index <- 1:nrow(new_d)
+# 
+# random_sample <- new_d |> 
+#     filter(index %in% sample(index, proportion_resample * nrow(new_d)))
+#   
+# 
+# random_sample <- random_sample |> 
+#   drop_na() |> 
+#   mutate(Petal.Length = scale(Petal.Length),
+#          Sepal.Length = scale(Sepal.Length),
+#          Petal.Width = scale(Petal.Width))
+# kmeans <- k_means(num_clusters = 2) |> 
+#     fit(~ Petal.Length + Petal.Width + Sepal.Length,
+#           data = random_sample)
+# 
+# random_sample |> 
+#   ggplot(aes(x = Petal.Length, y = Sepal.Length, color = as.factor(kmeans$fit$cluster))) +
+#   geom_point()
+# 
+# random_sample |> 
+#   ggplot(aes(x = Petal.Length, y = Sepal.Length, color = Species)) +
+#   geom_point()
 
 ```
 
@@ -279,6 +260,29 @@ final_sum_matrix |>
   ggplot(aes(x = final)) +
   geom_histogram() +
   facet_wrap(~k)
+```
+
+
+```{r}
+res <- final_sum_matrix |> 
+  group_by(k) |> 
+  summarize(mean = mean(final, na.rm = TRUE),
+            sd = sd(final, na.rm = TRUE))
+
+res
+
+res |> 
+  ggplot(aes(x = k)) +
+  geom_line(aes(y = mean)) +
+  geom_line(aes(y = sd))
+
+
+
+data |> 
+  ggplot(aes(x = bill_length_mm,
+             y = flipper_length_mm,
+             color = species)) +
+  geom_point()
 ```
 
 
