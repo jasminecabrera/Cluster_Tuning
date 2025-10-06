@@ -14,72 +14,61 @@ Why does this make sense? How would this be tuned - that is, what resampling doe
 Write a function here that calculates your "tuning metric" for a particular value of k.
 
 ```{r}
+#| eval: true
+
 # libraries
 library(tidyclust)
 library(tidyverse)
 library(tidymodels)
+library(purrr)
+library(fastDummies)
+library(matrixStats)
+
 ```
-
-80%
-
-1.  n_obs
-2.  make index col
-3.  make nxn matrix with 0
-4.  resample from data
-5.  run k-means cluster on data
-    1.  extract cluster assigments
-6.  two for loops
-    1.  for i in 1:size(resample)
-    2.  for j in 1:size(resample)
 
 ```{r}
 # EXECUTION TIME START
 start <- Sys.time()
+set.seed(123)
 
 # data
 data(penguins)
 data <- penguins
 
+# remove NA values before passing in since we can't handle NA values rn lmao
+data <- data |> 
+  drop_na() |>
+  mutate(bill_length_mm = scale(bill_length_mm),
+         flipper_length_mm = scale(flipper_length_mm))
+
 # create index column
 data$index <- 1:nrow(data)
 
-# remove NA values before passing in since we can't handle NA values rn lmao
-data <- data |> 
-  drop_na()
-
 # initialize variables
 min_k <- 3
-max_k <- 5
-number_of_resamples <- 3
-proportion_resample <- 0.8
+max_k <- 3
+number_of_resamples <- 20
+proportion_resample <- 0.5
 
 # initialize results list
 results <- list()
+
+# initialize similarities matrices list
+similarities_matrices <- list()
 ```
-
-For a given k, we want to resample j times.
-
-We need an index of every single observation in order to be able to compare consistently across all resamples.
-
-For a given k:
-
-\# Add an index column to keep track of observations even after shuffling \# Iterate over the resample amounts (from 1:j) \# first_data \<- Randomly select 80% of the data \# clust_assignment \<- clust(first_data)
-
-Convert clust_assignment to matrix form (this is the difficult part) The matrix is NA if the observation is being compared with itself (i = j) The matrix is symmetrical The value is equal to 1 if the observation is within the same cluster The value is equal to -1 if the observation is not in the same cluster The value is equal to 0 if either observation does not exist in that resample.
 
 ```{r}
 # loop through k
 for (k in min_k:max_k){
-  # reinitialize result matrix each k
-  result_matrix <- matrix(0, nrow = nrow(data), ncol = nrow(data))
-  
   # create list for key
   key = as.character(k)
   if (is.null(results[[key]])) {
     results[[key]] <- list()}
   
   # loop through resamples
-  for (i in 1:number_of_resamples) {
+  for (l in 1:number_of_resamples) {
+    # reinitialize result matrix each k
+    result_matrix <- matrix(0, nrow = nrow(data), ncol = nrow(data))
     
     # 80% resample
     random_sample <- data |> 
@@ -106,46 +95,293 @@ for (k in min_k:max_k){
         # get first point cluster
         first <- intermediate[n, ]$cluster
         
+        # get first point index
+        i <- as.numeric(intermediate[n, "index"])
+        
         # get second point cluster
         second <- intermediate[m, ]$cluster
         
+        # get second point index
+        j <- as.numeric(intermediate[m, "index"])
+        
         # if clusters are the same, 1
         if (first == second) {
-          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- 1}
+          result_matrix[i, j] <- 1
         
-        # if clusters are different, 0
-        else {
-          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- -1}}}
+        # if clusters are different, -1
+        } else {
+            result_matrix[i, j] <- -1}}}
   
     # if point i == j (on diagonal) then set to NA
     result_matrix[row(result_matrix) == col(result_matrix)] <- NA
     
     # set lower triangle to NA
     result_matrix[lower.tri(result_matrix)] <- NA
-    final_matrix <- result_matrix
     
-    # append matrix to key
-    results[[key]][[length(results[[key]]) + 1]] <- final_matrix
-    }}
+    # append matrix to key in results list
+    results[[key]][[length(results[[key]]) + 1]] <- result_matrix}
 
+  # should have # of resamples 
+  matrices <- results[[key]]
+
+  # make matrices into array
+  matrices_array <- simplify2array(matrices)
+
+  # only use upper triangle since the rest is NA
+  upper_triangle_idx <- which(upper.tri(matrices[[1]]))
+
+  # assign variables for equation
+  x <- sapply(matrices, function(m) m[upper_triangle_idx])
+  r <- rowSums(x == -1, na.rm = TRUE)
+  s <- rowSums(x == 1, na.rm = TRUE)
+  q <- rowSums(x == 0, na.rm = TRUE)
+  N <- length(matrices)
   
-# EXECUTION TIME START
-end <- Sys.time()
-end - start
+  disagreement_term <- ifelse(pmax(r, s) == 0, 0, pmin(r, s) / pmax(r, s))
+  zero_penalty <- q / N
+  
+  # individual similarity scores
+  final_vector <- 
+    round(pmax(0, 1 - (disagreement_term + zero_penalty)), 3)
+
+  # initialize NA matrix
+  similarity_matrix <- matrix(NA, nrow = nrow(data), ncol = nrow(data))
+  
+  # fill matrix with similarity scores
+  similarity_matrix[upper_triangle_idx] <- final_vector
+  
+  # append similarity_matrix to similarity matrices list
+  similarities_matrices[[length(similarities_matrices) + 1]] <- similarity_matrix}
 
 ```
 
 ```{r}
+#| eval: true
 # checking matrices for funsies
-length(results)
-results[["3"]][[1]]
-results[["4"]][[2]]
+#mat1 <- results[[key]][[1]]
+#mat2 <- results[[key]][[2]]
+#mat3 <- results[[key]][[3]]
+#mat4 <- results[[key]][[4]]
+#mat5 <- results[[key]][[5]]
+# mat6 <- results[[key]][[6]]
+# mat7 <- results[[key]][[7]]
+# mat8 <- results[[key]][[8]]
+# mat9 <- results[[key]][[9]]
+# mat10 <- results[[key]][[10]]
+
+matrix_test <- similarities_matrices[[1]]
+#matrix_test2 <- similarities_matrices[[2]]
+#matrix_test3 <- similarities_matrices[[3]]
+
+# double checking entries
+check <- results[[key]]
+values_ij <- numeric(length(check))
+for (k in 1:length(check)) {
+  mat <- check[[k]]
+  print(mat[3, 50])}
+
 ```
 
-## Experiments
+```{r}
+#| eval: false
+# testing new matrices to make sure distance is working
+set.seed(123)
+# initialize similarities matrices list
+similarities_matrices <- list()
 
-On either simulated data or real data with known structure, run several replications of your experiment for each of various k's. Make sure to set a seed.
+# making fake matrices for 1 "cluster"
+make_matrix <- function() {
+  m <- matrix(NA, nrow = 5, ncol = 5) 
+  m[upper.tri(m)] <- sample(c(-1, 0, 1), sum(upper.tri(m)), replace = TRUE)
+  return(m)}
 
-## Results
+mat1 <- make_matrix()
+mat2 <- make_matrix()
+mat3 <- make_matrix()
 
-What did your experiments show? Why do you think this happened? Is there anything promising here?
+matrices <- list(mat1, mat2, mat3)
+
+# only use upper triangle since the rest is NA
+upper_triangle_idx <- which(upper.tri(matrices[[1]])) 
+
+# assign variables for equation
+x <- sapply(matrices, function(m) m[upper_triangle_idx])
+r <- rowSums(x == -1, na.rm = TRUE)
+s <- rowSums(x == 1, na.rm = TRUE)
+q <- rowSums(x == 0, na.rm = TRUE)
+N <- length(matrices)
+
+disagreement_term <- ifelse(pmax(r, s) == 0, 0, pmin(r, s) / pmax(r, s))
+zero_penalty <- q / N
+
+# individual similarity scores
+final_vector <- 
+  round(pmax(0, 1 - (disagreement_term + zero_penalty)), 3)
+
+# initialize NA matrix
+similarity_matrix <- matrix(NA, nrow = 5, ncol = 5)
+
+# fill matrix with similarity scores
+similarity_matrix[upper_triangle_idx] <- final_vector
+
+# append similarity_matrix to similarity matrices list
+similarities_matrices[[length(similarities_matrices) + 1]] <- similarity_matrix
+  
+# comparing similarities matrices to 1s matrix
+upper_triangle_idx <- which(upper.tri(matrices[[1]]))
+similarities_array <- simplify2array(similarities_matrices)
+
+# grab upper triangle
+entries <-  apply(similarities_array, 3, function(m) m[upper_triangle_idx])
+
+# find matrix closest to 1 // maybe something wrong? trying w mean
+distances <- colMeans(abs(entries - 1))
+print(distances)
+
+# trying w median
+distances <- colMedians(abs(entries - 1))
+print(distances)
+
+```
+
+```{r}
+# comparing similarities matrices to 1s matrix
+upper_triangle_idx <- which(upper.tri(matrices[[1]]))
+similarities_array <- simplify2array(similarities_matrices)
+
+# grab upper triangle
+entries <-  apply(similarities_array, 3, function(m) m[upper_triangle_idx])
+
+# find matrix closest to 1 // maybe something wrong?
+distances <- colMeans(abs(entries - 1))
+
+# chosen matrix is best cluster
+k_values <- min_k:max_k
+best_index <- which.min(distances)
+print(paste("Best Cluster:", k_values[best_index]))
+```
+
+```{r}
+# EXECUTION TIME END
+distances
+end <- Sys.time()
+end - start
+```
+
+## Testing Different Similarity Scores
+
+[**Similarity Score 1**]{.underline}**:** Disagreement Term \* 0s Penalty Term
+
+-   **Disagreement Term:** (1 - (c\*min(#1s, #-1s)) / sum(#1s, #-1s))
+
+    -   **currently c = 2:**
+
+    -   potential problem where (1, -1, 1, -1, 1) has a lower similarity score than (0, 0, 0, -1, 1).
+
+    -   weighs disagreements more than having 0s, but these two should be fairly the same
+
+-   **0s Penalty Term:** (sum(#1s, #-1s) / sum(#1s, #-1s, #0s))
+
+-   **Results:**
+
+```         
+min_k <- 2
+max_k <- 4
+number_of_resamples <- 7
+proportion_resample <- 0.85
+
+c = 3:
+0.2868722 0.3102698 0.4549564
+50.8 sec
+
+c = 3.5:
+0.2883262 0.3156247 0.4844264
+```
+
+**Takeaways:** Chooses Cluster 2
+
+[**Similarity Score 2**]{.underline}**:** Max(0, 1 - (Disagreement Term + Zero Penalty)
+
+-   **Disagreement Term:** min(#1, #-1)/max(#1, #-1)
+
+-   **Zero Penalty:** #0s/sum(#0,#1,#-1)
+
+```         
+min_k <- 2
+max_k <- 5
+number_of_resamples <- 10
+proportion_resample <- 0.90
+
+0.1990434 0.1952701 0.3187017 0.2667712
+Time difference of 1.800137 mins
+```
+
+```         
+min_k <- 2
+max_k <- 5
+number_of_resamples <- 7
+proportion_resample <- 0.85
+
+0.2841535 0.2958964 0.3960519 0.3151403
+Time difference of 1.13962 mins
+```
+
+```         
+min_k <- 2
+max_k <- 5
+number_of_resamples <- 8
+proportion_resample <- 0.85
+
+0.2828959 0.2960596 0.3408768 0.3663009
+Time difference of 1.281423 mins
+```
+
+```         
+min_k <- 2
+max_k <- 5
+number_of_resamples <- 10
+proportion_resample <- 0.5
+```
+
+```         
+min_k <- 2
+max_k <- 5
+number_of_resamples <- 20
+proportion_resample <- 0.5
+0.7596014 0.7734467 0.8013099 0.8033314
+Time difference of 1.088288 mins
+```
+
+**Takeaways:** Chooses Cluster 3 when number of resamples \> 8. Difference between the two are very small.
+
+## Looking at the Data
+
+```{r}
+data |>
+  ggplot(aes(x = flipper_length_mm,
+             y = bill_length_mm,
+             color = species)) +
+  geom_point() +
+  labs(x = "Flipper Length (mm)",
+       y = "Bill Length (mm)",
+       color = "Species")
+
+data |>
+  ggplot(aes(x = flipper_length_mm,
+             y = bill_length_mm)) +
+  geom_point() +
+  labs(x = "Flipper Length (mm)",
+       y = "Bill Length (mm)")
+```
+
+**Takeaways:**
+
+-   If one of the groups is too far away, the buddies algorithm will choose two clusters is better than 3
+
+-   
+
+normalize means to get props for similarity scores
+
+look at image()
+
+averages of -1, 1 -\> extreme separation (buddies, enemies)
