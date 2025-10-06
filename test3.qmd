@@ -1,10 +1,8 @@
 ---
-title: "Buddy System Testing"
+title: "test3"
 format: html
 editor: visual
 ---
-
-## Idea
 
 What principle are you using to measure a "good" cluster?\
 Why does this make sense? How would this be tuned - that is, what resampling does it need? Does this apply in general, or only for a particular type of clustering algorithm? Link any references that might help support this.
@@ -14,6 +12,7 @@ Why does this make sense? How would this be tuned - that is, what resampling doe
 Write a function here that calculates your "tuning metric" for a particular value of k.
 
 ```{r}
+set.seed(599)
 # Closely follows the algorithm set in Ben-Hur and Elisseeff paper: A stability based method for discovering structure in clustered data (2002)
 library(tidyclust)
 library(tidyverse)
@@ -22,14 +21,14 @@ library(tidymodels)
 # We need an index of every single observation in order to be able to compare consistently
 # across all resamples.
 
-k <- 3
 # set up k = 3 for initial testing
-data(penguins)
 data <- penguins
 
 # Remove NA values before passing in since we can't handle NA values rn lmao
 data <- data |> 
-  drop_na()
+  drop_na() |> 
+  mutate(bill_length_mm = scale(bill_length_mm),
+         flipper_length_mm = scale(flipper_length_mm))
 
 
 # For a given k:
@@ -46,69 +45,16 @@ data <- data |>
       # The value is equal to 0 if either observation does not exist in that resample.
   
 # Variable init
-k <- 3
-number_of_resamples <- 10
-proportion_resample <- 0.8
-data$index <- 1:nrow(data)
-results <- list()
-
-# For loop
-for (num_resample in 1:number_of_resamples) {
-  result_matrix <- matrix(0, nrow = nrow(data), ncol = nrow(data))
-  # 80% resample
-  random_sample <- data |> 
-    filter(index %in% sample(index, proportion_resample * nrow(data)))
-  
-  # Run k-means on resample
-  kmeans <- k_means(num_clusters = k) |> 
-    fit(~ bill_length_mm + flipper_length_mm,
-        data = random_sample)
-  
-  intermediate <- data.frame(random_sample$index,
-                             extract_cluster_assignment(kmeans) |> mutate(.cluster = as.character(.cluster)),
-                             stringsAsFactors = FALSE)
-  colnames(intermediate) <- c("index", "cluster")
-  
-  # I don't know how to vectorize this :(
-  for (n in 1:(nrow(intermediate) - 1)) {
-    for (m in (n + 1):nrow(intermediate)) {
-      # if the points are the same then set to NA
-      if (intermediate[n, ]$index == intermediate[m, ]$index) {
-
-        # problem here
-        result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- NA
-      } else {
-        # get first pointer cluster
-        first <- intermediate[n, ]$cluster
-        # get second pointer cluster
-        second <- intermediate[m, ]$cluster
-
-        # if clusters are the same
-        if (first == second) {
-          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- 1
-        } else {
-          # if clusters are different
-          result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- -1
-        }
-      }
-
-
-    }
-  }
-  for (i in 1:nrow(result_matrix)) {
-    result_matrix[i, i] <- NA
-  }
-  
-  results[[num_resample]] <- result_matrix
-}
+statistic <- data.frame()
 ```
 
 ```{r}
-resample_function <- function(data = data, k = 3, number_of_resamples = 10,
+resample_function <- function(data = data,
+                              k = 3,
+                              number_of_resamples = 5,
                               proportion_resample = 0.8) {
   data <- data |> 
     drop_na()
-  
   data$index <- 1:nrow(data)
   results <- list()
   
@@ -121,7 +67,7 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
     
     # Run k-means on resample
     kmeans <- k_means(num_clusters = k) |> 
-      fit(~ bill_length_mm + bill_depth_mm,
+      fit(~ bill_length_mm + flipper_length_mm,
           data = random_sample)
     
     intermediate <- data.frame(random_sample$index,
@@ -152,8 +98,8 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
             result_matrix[intermediate[n, ]$index, intermediate[m, ]$index] <- -1
           }
         }
-  
-  
+
+
       }
     }
     for (i in 1:nrow(result_matrix)) {
@@ -167,57 +113,45 @@ resample_function <- function(data = data, k = 3, number_of_resamples = 10,
 ```
 
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 10, k = 2)
-```
-
-```{r}
 final_sum_matrix <- data.frame()
 ```
 
-# k = 2
 
+# k = 2
 ```{r}
 res <- resample_function(data = data, number_of_resamples = 10, k = 2)
 final <- res |> 
-  reduce(`+`)
+  reduce(`+`) |> 
+  abs()
 
 final <- as.vector(final)
 
-data.frame(final) |> 
-  ggplot(aes(x = final)) +
-  geom_histogram()
-
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 2))
-
-
-
 ```
 
 # k = 3
-
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 10, k = 3)
+res <- resample_function(data = data, number_of_resamples = 20, k = 3)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector()
+  abs()
 
-data.frame(final) |> 
-  ggplot(aes(x = final)) +
-  geom_histogram()
+final <- as.vector(final)
 
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 3))
 
+
 ```
 
 # k = 4
-
 ```{r}
-res <- resample_function(data = data, number_of_resamples = 10, k = 4)
+res <- resample_function(data = data, number_of_resamples = 20, k = 4)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector()
+  as.vector() |> 
+  abs()
 
 # omg, flashback to zero-inflated poisson?????
 
@@ -225,43 +159,16 @@ final <- res |>
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 4))
 
-
-res <- resample_function(data = data, number_of_resamples = 10, k = 5)
+res <- resample_function(data = data, number_of_resamples = 20, k = 5)
 final <- res |> 
   reduce(`+`) |> 
-  as.vector()
-
+  as.vector() |> 
+  abs()
 # omg, flashback to zero-inflated poisson?????
 
 
 final_sum_matrix <- rbind(final_sum_matrix, data.frame(final) |> drop_na() |>
   mutate(k = 5))
-
-```
-
-```{r}
-new_d <- iris
-new_d$index <- 1:nrow(new_d)
-
-random_sample <- new_d |> 
-    filter(index %in% sample(index, proportion_resample * nrow(new_d)))
-  
-
-random_sample <- random_sample |> 
-  drop_na() |> 
-  mutate(Petal.Length = scale(Petal.Length),
-         Petal.Width = scale(Petal.Width))
-kmeans <- k_means(num_clusters = 3) |> 
-    fit(~ Petal.Length + Petal.Width,
-          data = random_sample)
-
-random_sample |> 
-  ggplot(aes(x = Petal.Length, y = Petal.Width, color = as.factor(kmeans$fit$cluster))) +
-  geom_point()
-
-random_sample |> 
-  ggplot(aes(x = Petal.Length, y = Petal.Width, color = Species)) +
-  geom_point()
 
 ```
 
@@ -272,6 +179,54 @@ final_sum_matrix |>
   geom_histogram() +
   facet_wrap(~k)
 ```
+
+
+```{r}
+res <- final_sum_matrix |> 
+  group_by(k) |> 
+  summarize(mean = mean(final, na.rm = TRUE),
+            sd = sd(final, na.rm = TRUE))
+
+res
+
+res |> 
+  ggplot(aes(x = k)) +
+  geom_line(aes(y = mean)) +
+  geom_line(aes(y = sd))
+
+
+
+data |> 
+  ggplot(aes(x = bill_length_mm,
+             y = flipper_length_mm,
+             color = species)) +
+  geom_point()
+```
+```{r}
+new_d <- penguins
+new_d$index <- 1:nrow(new_d)
+
+random_sample <- new_d |>
+    filter(index %in% sample(index, 0.5 * nrow(new_d)))
+
+
+random_sample <- random_sample |>
+  drop_na() |>
+  mutate(bill_length_mm = scale(bill_length_mm),
+         flipper_length_mm = scale(flipper_length_mm))
+kmeans <- k_means(num_clusters = 2) |>
+    fit(~ bill_length_mm + flipper_length_mm,
+          data = random_sample)
+
+random_sample |>
+  ggplot(aes(x = bill_length_mm, y = flipper_length_mm, color = as.factor(kmeans$fit$cluster))) +
+  geom_point()
+
+random_sample |>
+  ggplot(aes(x = bill_length_mm, y = flipper_length_mm, color = species)) +
+  geom_point()
+```
+
 
 ## Experiments
 
