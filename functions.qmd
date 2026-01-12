@@ -1,0 +1,337 @@
+---
+title: "functions"
+author: "Jasmine Cabrera"
+format: html
+editor: visual
+---
+
+## Libraries & Parallelization
+
+```{r}
+library(tidyclust)
+library(tidyverse)
+library(tidymodels)
+library(foreach)
+library(doParallel)
+library(MASS)
+
+doParallel::registerDoParallel(cores = detectCores() - 5)
+```
+
+## Functions
+
+### **simulate_mvn()**
+
+```{r}
+simulate_mvn <- function(n = 100, 
+                         covariance = 0.7,
+                         desired_k = 3,
+                         start_seed = 123){
+  
+  set.seed(start_seed)
+  
+  # creating covariance matrix
+  cov_matrix <- diag(2) * covariance
+  
+  # if desired k is wanted
+  if (!is.null(desired_k) && desired_k > 0)  {
+    
+    # obs per cluster
+    n_per_cluster <- ceiling(n / desired_k)
+    
+    # distance between each cluster center
+    separation <- 3
+    
+    # create grid coordinates for means
+    grid_coords <- expand.grid(x = seq(0, 
+                                       by = separation,
+                                       length.out = ceiling(sqrt(desired_k))),
+                               y = seq(0, 
+                                       by = separation, 
+                                       length.out = ceiling(sqrt(desired_k))))
+    
+    # pick first k grid points
+    centers <- grid_coords[1:desired_k, ]
+    
+    # generate data
+    data <- do.call(rbind, lapply(1:desired_k, function(k){
+      
+      # determine mean
+      mu <- c(centers$x[k], centers$y[k])
+      
+      # generate clusters
+      MASS::mvrnorm(n = n_per_cluster,
+                    mu = mu,
+                    Sigma = cov_matrix)}))
+
+  
+  # if no desired kvalue
+  }else{
+    # mu
+    mu <- c(0, 0)
+    
+    # data
+    data <- MASS::mvrnorm(n = n,
+                         mu = mu,
+                         Sigma = cov_matrix)}
+  
+  # change to dataframe
+  data <- as.data.frame(data)
+  
+  # standardize
+  data <- data |>
+  dplyr::mutate(across(c(V1, V2), ~ (. - mean(.)) / sd(.)))
+  
+  # change col names
+  colnames(data) <- c("V1", "V2")
+  
+  return(data)}
+```
+
+------------------------------------------------------------------------
+
+### **buddies_matrix()**
+
+```{r}
+buddies_matrix <- function(data = data, 
+                           k = 3,
+                           subsample_prop = 0.8, 
+                           num_subsamples = 10,
+                           start_seed = 123){
+  
+  # add index
+  data$index <- 1:nrow(data)
+  
+  # initialize results list -- holds matrix for each subsample in each k
+  results <- list()
+
+  
+  results <- foreach(i = 1:num_subsamples,
+                     .packages = c("tidyclust", 
+                                   "tidyverse", 
+                                   "tidymodels")) %dopar% {
+                       
+                       
+                       # initalizing blank matrix              
+                       result_matrix <- matrix(0, 
+                                               nrow = nrow(data),
+                                               ncol = nrow(data))
+                       
+                       # seed
+                       set.seed(start_seed + i)
+                       
+                       # resample
+                       random_sample <- data |>
+                         filter(index %in% sample(index, subsample_prop * nrow(data))) 
+                       
+                       # kmeans
+                       kmodel <- k_means(num_clusters = k) |>
+                         fit(~ random_sample[[1]] + random_sample[[2]],
+                             data = random_sample)
+                       
+                       # assign points to cluster
+                       intermediate <- data.frame(random_sample$index,
+                                                  extract_cluster_assignment(kmodel) |>
+                                                  mutate(.cluster = as.character(.cluster)),
+                                                  stringsAsFactors = FALSE)
+                       
+                       # rename columns
+                       colnames(intermediate) <- c("index", "cluster")
+                       
+                      # assign results matrix (-1, 1, 0)
+                      for (c in unique(intermediate$cluster)){
+                        idx <- intermediate[intermediate$cluster == c, ]$index
+                        
+                        if (length(idx) > 1){
+                          idx <- sort(unlist(idx), method = "radix")
+                          #idx <- sort(idx)
+                          ones <- t(combn(idx, 2))
+                          result_matrix[ones[, 1], ones[, 2]] <- 1}
+
+                        neg_one_idx <- expand.grid(idx, setdiff(random_sample$index, idx))
+                        result_matrix[neg_one_idx[, 1], neg_one_idx[, 2]] <- -1}
+                     
+                      # set lower triangle and diagonal to NA
+                      result_matrix[lower.tri(result_matrix, diag = TRUE)] <- NA
+                      
+                    
+                      return(result_matrix)}
+                    
+  # return results
+  return(results)}
+```
+
+------------------------------------------------------------------------
+
+### **mean_matrix()**
+
+```{r}
+mean_matrix <- function(data = data,
+                          k = 3,
+                          subsample_prop = 0.8,
+                          num_subsamples = 10,
+                          start_seed = 123){
+  
+  # call simulate_cluster() function
+  results <- buddies_matrix(data, 
+                              k = k,
+                              subsample_prop = subsample_prop, 
+                              num_subsamples = num_subsamples,
+                              start_seed = start_seed)
+  
+  # abs value the entire matrix for all matrices
+  absolute_sum <- lapply(results, abs)
+  
+  # get sum of abs value in final matrix
+  absolute_final <- absolute_sum |>
+    reduce(`+`)
+  
+  # get sum of values in final matrix
+  numerator <- results |>
+    reduce(`+`)
+  
+  return(list(matrices = results, score = numerator/absolute_final))}
+```
+
+------------------------------------------------------------------------
+
+### **similarity_score()**
+
+```{r}
+similarity_score <- function(mean_matrix = mean_matrix){
+  
+  # get score matrix
+  mean_matrix_score <- mean_matrix$score 
+  
+  # transforms into vector
+  result_vector <- as.vector(mean_matrix_score)
+  
+  # keeps only non NA values
+  result_vector <- abs(result_vector[!is.na(result_vector)])
+  
+  # finds squared distance from one
+  return(sum((1 - result_vector)**2))}
+```
+
+------------------------------------------------------------------------
+
+### simulation_scores()
+
+```{r}
+simulation_scores <- function(data = NULL,
+                              n = 100,
+                              covariance = 0.7,
+                              desired_k = 3, 
+                              min_k = 2,
+                              max_k = 5,
+                              subsample_prop = 0.8, 
+                              num_subsamples = 10,
+                              start_seed = 123){
+  
+  # simulate data
+  if (is.null(data)) {
+  data <- simulate_mvn(n = n, 
+                       covariance = covariance, 
+                       desired_k = desired_k)}
+  
+  # intialize score list
+  k_scores <- data.frame(k = numeric(),
+                         score = numeric(),
+                         time = numeric(),
+                         best_clust = character())
+  
+  # iterate over k values
+  for (k in min_k:max_k){
+    
+      # start time
+      tictoc::tic()
+    
+      # get buddies matrices and overall mean matrix
+      mean_matrix <- mean_matrix(data = data, 
+                                 k = k, 
+                                 subsample_prop = subsample_prop, 
+                                 num_subsamples = num_subsamples, 
+                                 start_seed = start_seed)
+      
+      # store all scores
+      score <- similarity_score(mean_matrix = mean_matrix)
+      
+      # end time
+      time_info <- tictoc::toc(quiet = TRUE)
+      
+      # calculate execution time
+      elapsed_time <- time_info$toc - time_info$tic
+      
+      # add to results
+      k_scores <- rbind(k_scores,
+                        data.frame(k = k,
+                                   score = score,
+                                   time = elapsed_time,
+                                   best_clust = ""))}
+      
+  # find row with lowest score 
+  best_score_idx <- which.min(k_scores$score)
+  k_scores$best_clust[best_score_idx] <- "BEST"
+  
+  # get similarity score
+  return(k_scores)}
+```
+
+------------------------------------------------------------------------
+
+### repeat_simulations()
+
+```{r}
+repeat_simulations <- function(data = NULL,
+                               num_runs = 20,
+                               n = 100,
+                               covariances = c(0.05, 0.1, 0.3, 0.5), 
+                               desired_k = 3, 
+                               min_k = 2,
+                               max_k = 5,
+                               subsample_prop = 0.8, 
+                               num_subsamples = 10,
+                               start_seed = 123) {
+  
+  # initialize results list
+  results_list <- list()
+  
+  # create counter
+  counter <- 1
+  
+  # loop through covariances
+  for (covariance in covariances) {
+    
+    # loop through number of runs/reps
+    for (i in seq_len(num_runs)) {
+      
+      # alternate seed
+      current_seed <- start_seed + i
+      
+      # call simulation_scores()
+      sim_result <- simulation_scores(data = data,
+                                      start_seed = current_seed,
+                                      n = n,
+                                      covariance = covariance,
+                                      desired_k = desired_k, 
+                                      min_k = min_k,
+                                      max_k = max_k,
+                                      subsample_prop = subsample_prop, 
+                                      num_subsamples = num_subsamples)
+      
+      # add rep identifier
+      sim_result$run <- i
+      
+      # add covariance identifier
+      sim_result$covariance <- covariance
+      
+      # store result
+      results_list[[counter]] <- sim_result
+      
+      # increase counter
+      counter <- counter + 1}}
+  
+  # combine all results
+  all_results <- do.call(rbind, results_list)
+  return(all_results)}
+```
